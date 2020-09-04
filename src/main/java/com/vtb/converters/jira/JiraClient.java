@@ -5,19 +5,21 @@ import com.atlassian.jira.rest.client.api.JiraRestClient;
 import com.atlassian.jira.rest.client.api.domain.BasicVotes;
 import com.atlassian.jira.rest.client.api.domain.Comment;
 import com.atlassian.jira.rest.client.api.domain.Issue;
+import com.atlassian.jira.rest.client.api.domain.IssueLink;
 import com.atlassian.jira.rest.client.api.domain.input.IssueInput;
 import com.atlassian.jira.rest.client.api.domain.input.IssueInputBuilder;
+import com.atlassian.jira.rest.client.api.domain.input.LinkIssuesInput;
 import com.atlassian.jira.rest.client.internal.async.AsynchronousJiraRestClientFactory;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.configuration2.HierarchicalConfiguration;
+import org.apache.commons.configuration2.XMLConfiguration;
+import org.apache.commons.configuration2.builder.fluent.Configurations;
+import org.apache.commons.configuration2.ex.ConfigurationException;
+import org.apache.commons.configuration2.tree.ImmutableNode;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
@@ -27,12 +29,12 @@ import java.util.stream.StreamSupport;
 @Slf4j
 @Data
 public class JiraClient {
+    public static final Long TASK = 10003L;
     private String projectKey;
     private String username;
     private String password;
     private String jiraUrl;
     private JiraRestClient restClient;
-    public static final Long TASK = 10003L;
 
     private JiraClient(String username, String password, String jiraUrl) {
         this.username = username;
@@ -42,7 +44,7 @@ public class JiraClient {
     }
 
     public static void main(String[] args) throws IOException, InterruptedException, ExecutionException, TimeoutException {
-        String parentProjectKey = null;
+/*        String parentProjectKey = null;
 
         if (args.length > 0) {
             parentProjectKey = Arrays.stream(args)
@@ -56,11 +58,33 @@ public class JiraClient {
         } else {
             log.error("Must have at least nonempty parentProject arg");
             System.exit(1);
+        }*/
+
+
+        Configurations configs = new Configurations();
+
+        try {
+            XMLConfiguration config = configs.xml("config.xml");
+            List<HierarchicalConfiguration<ImmutableNode>> fields =
+                    config.configurationsAt("dispersion.epics.epic");
+            JiraClient jiraClient = new JiraClient(
+                    config.getString("identity.username"),
+                    config.getString("identity.password"),
+                    config.getString("identity.url"));
+
+            for (HierarchicalConfiguration sub : fields) {
+                String epicKey = sub.getString("[@key]");
+                String targetProject = sub.getString("[@targetProject]");
+                log.info("Create children of epic key= {}, target project = {}", epicKey, targetProject);
+                jiraClient.createChildren(epicKey, targetProject);
+            }
+
+            jiraClient.restClient.close();
+        } catch (ConfigurationException cex) {
+            log.error("Something went wrong at configuration reading", cex);
         }
 
-        JiraClient jiraClient = new JiraClient("archimagealex", "au_$Y5!VvSX6QW8", "http://localhost:8088");
-
-        Path path = Files.createTempFile("jira", "out.txt");
+//        Path path = Files.createTempFile("jira", "out.txt");
 /*        final String issueKey = jiraClient.createIssue(PROJECT_KEY, TASK, "Issue created from JRJC");
         log.info("Issue {} created", issueKey);
         jiraClient.updateIssueDescription(issueKey, "This is description from my Jira Client");
@@ -83,7 +107,7 @@ public class JiraClient {
                 .getProject(PROJECT_KEY).get(1L, TimeUnit.MINUTES)
                 .getComponents().forEach(c -> log.info(c.getName()));*/
 
-        log.info("Issues of project {} are:", parentProjectKey);
+/*        log.info("Issues of project {} are:", parentProjectKey);
         jiraClient.getProjectIssues(parentProjectKey)
                 .forEach(i -> log.info("Issue id: {}, issue summary: {}", i.getId(), i.getSummary()));
 
@@ -100,8 +124,34 @@ public class JiraClient {
                         e.printStackTrace();
                     }
                 });
-        log.info("Written to file {}", path.toString());
-        jiraClient.restClient.close();
+        log.info("Written to file {}", path.toString());*/
+    }
+
+    private void createChildren(String epicKey, String targetProject) throws ExecutionException, InterruptedException {
+        final Issue parentEpic = getIssue(epicKey);
+        boolean issueAlreadyExists = false;
+
+        for (IssueLink il : parentEpic.getIssueLinks()) {
+            if (getIssue(il.getTargetIssueKey()).getSummary().equals(parentEpic.getSummary() + ". Аналитика")) {
+                issueAlreadyExists = true;
+                break;
+            }
+        }
+
+        if (!issueAlreadyExists) {
+            IssueInputBuilder issueInputBuilder = new IssueInputBuilder();
+            issueInputBuilder.setFieldValue("customfield_10101", epicKey);
+            issueInputBuilder.setFieldValue("customfield_11612", "542 Унификация ИТ-платформ, "); // Программа-заказчик
+            issueInputBuilder.setFieldValue("customfield_11613", "581 Внедрение АБС ЦФТ 2.0 для физических лиц"); // Проект-заказчик
+            issueInputBuilder.setFieldValue("customfield_11611", "Кредиты, "); // Стрим-владелец
+            issueInputBuilder.setFieldValue("customfield_11610", "Кредиты, "); // Стрим-заказчик
+            issueInputBuilder.setFieldValue("customfield_", ""); //
+            issueInputBuilder.setSummary(parentEpic.getSummary() + ". Аналитика");
+            issueInputBuilder.setProjectKey(targetProject);
+            issueInputBuilder.setIssueTypeId(TASK);
+            Issue issue = (Issue) restClient.getIssueClient().createIssue(issueInputBuilder.build()).get();
+            log.info("Issue {} created, linked to epic {}", issue.getKey(), parentEpic.getKey());
+        }
     }
 
     private Iterable<Issue> getFilteredIssues(String jql) throws InterruptedException, ExecutionException {
@@ -122,15 +172,15 @@ public class JiraClient {
         return issueClient.createIssue(newIssue).claim().getKey();
     }
 
-    private Issue getIssue(String issueKey) {
-        return restClient.getIssueClient().getIssue(issueKey).claim();
+    private Issue getIssue(String issueKey) throws ExecutionException, InterruptedException {
+        return restClient.getIssueClient().getIssue(issueKey).get();
     }
 
     private void voteForAnIssue(Issue issue) {
         restClient.getIssueClient().vote(issue.getVotesUri()).claim();
     }
 
-    private int getTotalVotesCount(String issueKey) {
+    private int getTotalVotesCount(String issueKey) throws ExecutionException, InterruptedException {
         BasicVotes votes = getIssue(issueKey).getVotes();
         return votes == null ? 0 : votes.getVotes();
     }
@@ -139,7 +189,7 @@ public class JiraClient {
         restClient.getIssueClient().addComment(issue.getCommentsUri(), Comment.valueOf(commentBody));
     }
 
-    private List<Comment> getAllComments(String issueKey) {
+    private List<Comment> getAllComments(String issueKey) throws ExecutionException, InterruptedException {
         return StreamSupport.stream(getIssue(issueKey).getComments().spliterator(), false)
                 .collect(Collectors.toList());
     }
@@ -160,5 +210,10 @@ public class JiraClient {
 
     private URI getJiraUri() {
         return URI.create(this.jiraUrl);
+    }
+
+    private void setEpicLink(Issue issue, Issue epic) {
+        LinkIssuesInput lii = new LinkIssuesInput(issue.getKey(), epic.getKey(), "");
+        restClient.getIssueClient().linkIssue(lii);
     }
 }

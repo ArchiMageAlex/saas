@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<configuration>
+    <identity>
+        <username>vtb226295@region.vtb.ru</username>
+        <url>http://task.dev.corp.vtb.ru/</url>
+    </identity>
+    <parent>
+        <projectKey>LPAD</projectKey>
+    </parent>
+    <dispersion>
+        <epics>
+            <epic key="LPAD-1" targetProject="LPAD"/>
+        </epics>
+    </dispersion>
+</configuration>
