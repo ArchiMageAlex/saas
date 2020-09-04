@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <configuration>
     <identity>
-        <username>vtb226295@region.vtb.ru</username>
-        <url>http://task.dev.corp.vtb.ru/</url>
+        <username></username>
+        <url></url>
     </identity>
     <parent>
         <projectKey>LPAD</projectKey>
